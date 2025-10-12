@@ -4,8 +4,9 @@ use chrono::{DateTime, Utc};
 use utoipa::ToSchema;
 use base64::engine::Engine;
 use borsh::BorshDeserialize;
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 use serde_with::{serde_as, DisplayFromStr};
+
 
 /// Event discriminators - correct discriminators from IDL file
 pub const TOKEN_CREATED_EVENT_DISCRIMINATOR: [u8; 8] = [96, 122, 113, 138, 50, 227, 149, 57];
@@ -14,6 +15,7 @@ pub const LONG_SHORT_EVENT_DISCRIMINATOR: [u8; 8] = [27, 69, 20, 116, 58, 250, 9
 pub const FORCE_LIQUIDATE_EVENT_DISCRIMINATOR: [u8; 8] = [234, 196, 183, 105, 40, 26, 206, 48];
 pub const FULL_CLOSE_EVENT_DISCRIMINATOR: [u8; 8] = [22, 244, 113, 245, 154, 168, 109, 139];
 pub const PARTIAL_CLOSE_EVENT_DISCRIMINATOR: [u8; 8] = [133, 94, 3, 222, 24, 68, 69, 155];
+pub const MILESTONE_DISCOUNT_EVENT_DISCRIMINATOR: [u8; 8] = [130,232,11,37,34,185,136,128];
 
 
 
@@ -27,6 +29,7 @@ pub enum SpinPetEvent {
     ForceLiquidate(ForceLiquidateEvent),
     FullClose(FullCloseEvent),
     PartialClose(PartialCloseEvent),
+    MilestoneDiscount(MilestoneDiscountEvent),
 }
 
 /// Token creation event - exactly matches original Anchor structure
@@ -35,9 +38,18 @@ pub struct TokenCreatedEvent {
     pub payer: String,
     pub mint_account: String,
     pub curve_account: String,
+    pub pool_token_account: String,
+    pub pool_sol_account: String,
+    pub fee_recipient: String,
+    pub base_fee_recipient: String,        // 基础手续费接收账户
+    pub params_account: String,            // 合作伙伴参数账户PDA地址
     pub name: String,
     pub symbol: String,
     pub uri: String,
+    pub swap_fee: u16,                     // 现货交易手续费
+    pub borrow_fee: u16,                   // 保证金交易手续费
+    pub fee_discount_flag: u8,             // 手续费折扣标志 0: 原价 1: 5折 2: 2.5折  3: 1.25折
+
     #[schema(value_type = String)]
     pub timestamp: DateTime<Utc>,
     pub signature: String,
@@ -159,9 +171,25 @@ pub struct PartialCloseEvent {
     pub slot: u64,
 }
 
+/// Milestone Discount event - exactly matches original Anchor structure
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct MilestoneDiscountEvent {
+    pub payer: String,
+    pub mint_account: String,
+    pub curve_account: String,
+    pub swap_fee: u16,                     // 现货交易手续费
+    pub borrow_fee: u16,                   // 保证金交易手续费
+    pub fee_discount_flag: u8,             // 手续费折扣标志 0: 原价 1: 5折 2: 2.5折  3: 1.25折
+    #[schema(value_type = String)]
+    pub timestamp: DateTime<Utc>,
+    pub signature: String,
+    pub slot: u64,
+}
+
 /// Event parser
 #[derive(Clone)]
 pub struct EventParser {
+    #[allow(dead_code)]
     pub program_id: Pubkey,
 }
 
@@ -170,8 +198,100 @@ impl EventParser {
         let program_id = program_id.parse::<Pubkey>()?;
         Ok(Self { program_id })
     }
+    
+    /// Parse events with call stack tracking to capture CPI events
+    pub fn parse_events_with_call_stack(
+        &self,
+        logs: &[String],
+        signature: &str,
+        slot: u64,
+    ) -> anyhow::Result<Vec<SpinPetEvent>> {
+        let mut events = Vec::new();
+        let mut program_stack = Vec::new();
+        let mut in_target_program = false;
+        
+        debug!("Starting call stack parsing for {} log lines", logs.len());
+        
+        for (i, log) in logs.iter().enumerate() {
+            debug!("Processing log[{}]: {}", i, log);
+            
+            // Track program invocations
+            if log.contains(" invoke [") {
+                // Extract program ID from log like "Program <pubkey> invoke [depth]"
+                if let Some(program_id) = Self::extract_program_id_from_log(log) {
+                    program_stack.push(program_id.clone());
+                    debug!("Program {} entered stack (depth: {})", program_id, program_stack.len());
+                    
+                    // Check if our target program is now in the stack
+                    if program_id == self.program_id.to_string() {
+                        in_target_program = true;
+                        debug!("Target program {} is now active", self.program_id);
+                    }
+                }
+            } else if log.contains(" success") || log.contains(" failed") {
+                // Program exit - pop from stack
+                if let Some(exited_program) = program_stack.pop() {
+                    debug!("Program {} exited stack (remaining depth: {})", exited_program, program_stack.len());
+                    
+                    // Check if we're still in target program context
+                    in_target_program = program_stack.iter().any(|p| p == &self.program_id.to_string());
+                    if !in_target_program {
+                        debug!("Target program {} is no longer active", self.program_id);
+                    }
+                }
+            }
+            
+            // Parse "Program data:" logs when in target program context
+            if in_target_program && log.starts_with("Program data:") {
+                debug!("Found Program data in target program context at log[{}]", i);
+                
+                if let Some(data_part) = log.strip_prefix("Program data: ") {
+                    let data_part = data_part.trim();
+                    
+                    // Base64 decode
+                    match base64::engine::general_purpose::STANDARD.decode(data_part) {
+                        Ok(data) => {
+                            debug!("Successfully decoded Base64 data, length: {}", data.len());
+                            
+                            // Parse event from data
+                            match self.parse_event_data(&data, signature, slot) {
+                                Ok(Some(event)) => {
+                                    debug!("Successfully parsed event from CPI context: {:?}", event);
+                                    events.push(event);
+                                }
+                                Ok(None) => {
+                                    debug!("Data didn't match any event discriminator");
+                                }
+                                Err(e) => {
+                                    warn!("Failed to parse event data: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            warn!("Base64 decoding failed: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+        
+        debug!("Call stack parsing complete. Found {} events", events.len());
+        Ok(events)
+    }
+    
+    /// Extract program ID from invoke log line
+    fn extract_program_id_from_log(log: &str) -> Option<String> {
+        // Log format: "Program <pubkey> invoke [depth]"
+        if let Some(start) = log.find("Program ") {
+            let after_program = &log[start + 8..];
+            if let Some(end) = after_program.find(" invoke") {
+                return Some(after_program[..end].to_string());
+            }
+        }
+        None
+    }
 
-    /// Parse log data into event list
+    /// Parse log data into event list (legacy method for backward compatibility)
     pub fn parse_event_from_logs(
         &self,
         logs: &[String],
@@ -180,27 +300,94 @@ impl EventParser {
     ) -> anyhow::Result<Vec<SpinPetEvent>> {
         let mut events = Vec::new();
         
+        debug!("🔍 Starting to parse {} log lines", logs.len());
+        
         // Find program event logs
-        for log in logs {
+        for (i, log) in logs.iter().enumerate() {
+            debug!("📝 Checking log[{}]: {}", i, log);
+            
             if log.starts_with("Program data:") {
-                let data_part = log.strip_prefix("Program data: ").unwrap_or("");
-                debug!("🔍 Parsing program data: {}", data_part);
-                if let Ok(event_data) = base64::engine::general_purpose::STANDARD.decode(data_part) {
-                    debug!("📊 Successfully decoded Base64 data, length: {}", event_data.len());
-                    match self.parse_event_data(&event_data, signature, slot) {
-                        Ok(Some(event)) => {
-                            debug!("✅ Successfully parsed event, adding to event list");
-                            events.push(event);
-                        }
-                        Ok(None) => {
-                            debug!("⚠️ Could not parse event - skipping this data");
-                        }
-                        Err(e) => {
-                            warn!("❌ Failed to parse event: {} - skipping this data", e);
-                        }
+                debug!("✨ Found Program data log at index {}", i);
+                let data_part = match log.strip_prefix("Program data: ") {
+                    Some(data) => {
+                        debug!("🔍 Extracted program data: {}", data);
+                        data.trim()
+                    },
+                    None => {
+                        warn!("⚠️ Failed to strip prefix from Program data log");
+                        continue;
                     }
+                };
+                
+                // 尝试Base64解码
+                let event_data = match base64::engine::general_purpose::STANDARD.decode(data_part) {
+                    Ok(data) => {
+                        debug!("📊 Successfully decoded Base64 data, length: {}", data.len());
+                        // 打印前16个字节用于调试判别器
+                        if data.len() >= 16 {
+                            debug!("🔍 First 16 bytes: {:?}", &data[..16]);
+                            if data.len() >= 8 {
+                                debug!("🔑 Discriminator bytes: {:?}", &data[0..8]);
+                            }
+                        }
+                        data
+                    },
+                    Err(e) => {
+                        warn!("⚠️ Base64 decoding failed for: {} - Error: {}", data_part, e);
+                        continue;
+                    }
+                };
+                
+                // 确保数据长度足够
+                if event_data.len() < 8 {
+                    warn!("⚠️ Decoded data too short ({} bytes), need at least 8 bytes for discriminator", event_data.len());
+                    continue;
+                }
+                
+                // 提取判别器并打印
+                let discriminator = &event_data[0..8];
+                debug!("🔑 Event discriminator: {:?}", discriminator);
+                
+                // 打印所有定义的判别器以进行比较
+                debug!("💡 Defined discriminators: TOKEN_CREATED={:?}, BUY_SELL={:?}, LONG_SHORT={:?}, FORCE_LIQUIDATE={:?}, FULL_CLOSE={:?}, PARTIAL_CLOSE={:?}, MILESTONE_DISCOUNT={:?}", 
+                       TOKEN_CREATED_EVENT_DISCRIMINATOR,
+                       BUY_SELL_EVENT_DISCRIMINATOR, 
+                       LONG_SHORT_EVENT_DISCRIMINATOR,
+                       FORCE_LIQUIDATE_EVENT_DISCRIMINATOR,
+                       FULL_CLOSE_EVENT_DISCRIMINATOR,
+                       PARTIAL_CLOSE_EVENT_DISCRIMINATOR,
+                       MILESTONE_DISCOUNT_EVENT_DISCRIMINATOR);
+                
+                // 比较判别器并打印结果
+                if discriminator == TOKEN_CREATED_EVENT_DISCRIMINATOR {
+                    debug!("✓ Matched TOKEN_CREATED_EVENT_DISCRIMINATOR");
+                } else if discriminator == BUY_SELL_EVENT_DISCRIMINATOR {
+                    debug!("✓ Matched BUY_SELL_EVENT_DISCRIMINATOR");
+                } else if discriminator == LONG_SHORT_EVENT_DISCRIMINATOR {
+                    debug!("✓ Matched LONG_SHORT_EVENT_DISCRIMINATOR");
+                } else if discriminator == FORCE_LIQUIDATE_EVENT_DISCRIMINATOR {
+                    debug!("✓ Matched FORCE_LIQUIDATE_EVENT_DISCRIMINATOR");
+                } else if discriminator == FULL_CLOSE_EVENT_DISCRIMINATOR {
+                    debug!("✓ Matched FULL_CLOSE_EVENT_DISCRIMINATOR");
+                } else if discriminator == PARTIAL_CLOSE_EVENT_DISCRIMINATOR {
+                    debug!("✓ Matched PARTIAL_CLOSE_EVENT_DISCRIMINATOR");
+                } else if discriminator == MILESTONE_DISCOUNT_EVENT_DISCRIMINATOR {
+                    debug!("✓ Matched MILESTONE_DISCOUNT_EVENT_DISCRIMINATOR");
                 } else {
-                    warn!("⚠️ Base64 decoding failed: {}", data_part);
+                    debug!("❌ No matching discriminator found");
+                }
+                
+                match self.parse_event_data(&event_data, signature, slot) {
+                    Ok(Some(event)) => {
+                        debug!("✅ Successfully parsed event: {:?}", event);
+                        events.push(event);
+                    }
+                    Ok(None) => {
+                        debug!("⚠️ Could not parse event - skipping this data");
+                    }
+                    Err(e) => {
+                        warn!("❌ Failed to parse event: {} - skipping this data", e);
+                    }
                 }
             }
         }
@@ -262,6 +449,11 @@ impl EventParser {
                 let event = self.parse_partial_close_event(event_data, signature, slot, timestamp)?;
                 Ok(Some(SpinPetEvent::PartialClose(event)))
             }
+            d if d == MILESTONE_DISCOUNT_EVENT_DISCRIMINATOR => {
+                debug!("💲 Matched MilestoneDiscountEvent, discriminator: {:?}", d);
+                let event = self.parse_milestone_discount_event(event_data, signature, slot, timestamp)?;
+                Ok(Some(SpinPetEvent::MilestoneDiscount(event)))
+            }
             _ => {
                 debug!("❓ Unknown event discriminator: {:?}", discriminator);
                 Ok(None)
@@ -279,8 +471,8 @@ impl EventParser {
     ) -> anyhow::Result<TokenCreatedEvent> {
         debug!("🪙 Starting to parse TokenCreatedEvent, data length: {}", data.len());
         
-        if data.len() < 96 {
-            return Err(anyhow::anyhow!("TokenCreatedEvent data length insufficient, need at least 96 bytes, actual: {}", data.len()));
+        if data.len() < 261 {
+            return Err(anyhow::anyhow!("TokenCreatedEvent data length insufficient, need at least 261 bytes, actual: {}", data.len()));
         }
 
         debug!("🔍 Parsing payer (0..32)");
@@ -298,8 +490,47 @@ impl EventParser {
             .map_err(|e| anyhow::anyhow!("Failed to parse curve_account: {}", e))?;
         debug!("✅ curve_account: {}", curve_account);
         
+        debug!("🔍 Parsing pool_token_account (96..128)");
+        let pool_token_account = Pubkey::try_from_slice(&data[96..128])
+            .map_err(|e| anyhow::anyhow!("Failed to parse pool_token_account: {}", e))?;
+        debug!("✅ pool_token_account: {}", pool_token_account);
+        
+        debug!("🔍 Parsing pool_sol_account (128..160)");
+        let pool_sol_account = Pubkey::try_from_slice(&data[128..160])
+            .map_err(|e| anyhow::anyhow!("Failed to parse pool_sol_account: {}", e))?;
+        debug!("✅ pool_sol_account: {}", pool_sol_account);
+        
+        debug!("🔍 Parsing fee_recipient (160..192)");
+        let fee_recipient = Pubkey::try_from_slice(&data[160..192])
+            .map_err(|e| anyhow::anyhow!("Failed to parse fee_recipient: {}", e))?;
+        debug!("✅ fee_recipient: {}", fee_recipient);
+
+        debug!("🔍 Parsing base_fee_recipient (192..224)");
+        let base_fee_recipient = Pubkey::try_from_slice(&data[192..224])
+            .map_err(|e| anyhow::anyhow!("Failed to parse base_fee_recipient: {}", e))?;
+        debug!("✅ base_fee_recipient: {}", base_fee_recipient);
+
+        debug!("🔍 Parsing params_account (224..256)");
+        let params_account = Pubkey::try_from_slice(&data[224..256])
+            .map_err(|e| anyhow::anyhow!("Failed to parse params_account: {}", e))?;
+        debug!("✅ params_account: {}", params_account);
+
+        debug!("🔍 Parsing swap_fee (256..258)");
+        let swap_fee = u16::from_le_bytes(data[256..258].try_into()
+            .map_err(|e| anyhow::anyhow!("Failed to parse swap_fee: {}", e))?);
+        debug!("✅ swap_fee: {}", swap_fee);
+
+        debug!("🔍 Parsing borrow_fee (258..260)");
+        let borrow_fee = u16::from_le_bytes(data[258..260].try_into()
+            .map_err(|e| anyhow::anyhow!("Failed to parse borrow_fee: {}", e))?);
+        debug!("✅ borrow_fee: {}", borrow_fee);
+
+        debug!("🔍 Parsing fee_discount_flag (260)");
+        let fee_discount_flag = data[260];
+        debug!("✅ fee_discount_flag: {}", fee_discount_flag);
+        
         // Parse string fields (Borsh format: 4-byte length + string data)
-        let mut offset = 96;
+        let mut offset = 261;
         debug!("🔍 Starting to parse string fields, starting offset: {}", offset);
         
         // Parse name
@@ -357,9 +588,17 @@ impl EventParser {
             payer: payer.to_string(),
             mint_account: mint_account.to_string(),
             curve_account: curve_account.to_string(),
+            pool_token_account: pool_token_account.to_string(),
+            pool_sol_account: pool_sol_account.to_string(),
+            fee_recipient: fee_recipient.to_string(),
+            base_fee_recipient: base_fee_recipient.to_string(),
+            params_account: params_account.to_string(),
             name,
             symbol,
             uri,
+            swap_fee,
+            borrow_fee,
+            fee_discount_flag,
             timestamp,
             signature: signature.to_string(),
             slot,
@@ -812,6 +1051,63 @@ impl EventParser {
             slot,
         })
     }
+
+    /// Parse MilestoneDiscountEvent
+    fn parse_milestone_discount_event(
+        &self,
+        data: &[u8],
+        signature: &str,
+        slot: u64,
+        timestamp: DateTime<Utc>,
+    ) -> anyhow::Result<MilestoneDiscountEvent> {
+        debug!("💲 Starting to parse MilestoneDiscountEvent, data length: {}", data.len());
+        
+        if data.len() < 99 {
+            return Err(anyhow::anyhow!("MilestoneDiscountEvent data length insufficient, need at least 99 bytes, actual: {}", data.len()));
+        }
+
+        debug!("🔍 Parsing payer (0..32)");
+        let payer = Pubkey::try_from_slice(&data[0..32])
+            .map_err(|e| anyhow::anyhow!("Failed to parse payer: {}", e))?;
+        debug!("✅ payer: {}", payer);
+
+        debug!("🔍 Parsing mint_account (32..64)");
+        let mint_account = Pubkey::try_from_slice(&data[32..64])
+            .map_err(|e| anyhow::anyhow!("Failed to parse mint_account: {}", e))?;
+        debug!("✅ mint_account: {}", mint_account);
+
+        debug!("🔍 Parsing curve_account (64..96)");
+        let curve_account = Pubkey::try_from_slice(&data[64..96])
+            .map_err(|e| anyhow::anyhow!("Failed to parse curve_account: {}", e))?;
+        debug!("✅ curve_account: {}", curve_account);
+
+        debug!("🔍 Parsing swap_fee (96..98)");
+        let swap_fee = u16::from_le_bytes(data[96..98].try_into()
+            .map_err(|e| anyhow::anyhow!("Failed to parse swap_fee: {}", e))?);
+        debug!("✅ swap_fee: {}", swap_fee);
+
+        debug!("🔍 Parsing borrow_fee (98..100)");
+        let borrow_fee = u16::from_le_bytes(data[98..100].try_into()
+            .map_err(|e| anyhow::anyhow!("Failed to parse borrow_fee: {}", e))?);
+        debug!("✅ borrow_fee: {}", borrow_fee);
+
+        debug!("🔍 Parsing fee_discount_flag (100)");
+        let fee_discount_flag = data[100];
+        debug!("✅ fee_discount_flag: {}", fee_discount_flag);
+
+        debug!("🎉 MilestoneDiscountEvent parsed");
+        Ok(MilestoneDiscountEvent {
+            payer: payer.to_string(),
+            mint_account: mint_account.to_string(),
+            curve_account: curve_account.to_string(),
+            swap_fee,
+            borrow_fee,
+            fee_discount_flag,
+            timestamp,
+            signature: signature.to_string(),
+            slot,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -827,6 +1123,7 @@ mod tests {
         assert_eq!(FORCE_LIQUIDATE_EVENT_DISCRIMINATOR.len(), 8);
         assert_eq!(FULL_CLOSE_EVENT_DISCRIMINATOR.len(), 8);
         assert_eq!(PARTIAL_CLOSE_EVENT_DISCRIMINATOR.len(), 8);
+        assert_eq!(MILESTONE_DISCOUNT_EVENT_DISCRIMINATOR.len(), 8);
         
         // Test that each discriminator is unique
         let discriminators = vec![
@@ -836,6 +1133,7 @@ mod tests {
             FORCE_LIQUIDATE_EVENT_DISCRIMINATOR,
             FULL_CLOSE_EVENT_DISCRIMINATOR,
             PARTIAL_CLOSE_EVENT_DISCRIMINATOR,
+            MILESTONE_DISCOUNT_EVENT_DISCRIMINATOR,
         ];
         
         for (i, disc1) in discriminators.iter().enumerate() {
