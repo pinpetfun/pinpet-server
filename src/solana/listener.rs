@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::collections::HashSet;
 use async_trait::async_trait;
 use uuid::Uuid;
+use tokio::sync::Mutex;
 
 /// Event listener trait
 #[async_trait]
@@ -162,7 +163,7 @@ impl SolanaEventListener {
                     }
                 }
                 
-                info!("🎯 Event processor stopped");
+                warn!("🎯 Event processor stopped - this may indicate connection issues");
             });
         }
         
@@ -179,13 +180,18 @@ impl SolanaEventListener {
             let event_parser = self.event_parser.clone();
             
             tokio::spawn(async move {
-                info!("🔄 Reconnection handler started");
+                info!("🔄 Reconnection handler started and ready to receive signals");
                 let mut reconnect_attempts = 0u32;
+                let mut last_reconnect_time = std::time::Instant::now();
                 
                 while let Some(_) = receiver.recv().await {
+                    let elapsed_since_last = last_reconnect_time.elapsed();
+                    info!("🔔 Reconnection handler received signal ({}s since last signal)", elapsed_since_last.as_secs());
+                    last_reconnect_time = std::time::Instant::now();
+                    
                     // Check if we should stop
                     if *should_stop.read().await {
-                        info!("Reconnection handler received stop signal");
+                        info!("Reconnection handler received stop signal, exiting");
                         break;
                     }
                     
@@ -200,9 +206,8 @@ impl SolanaEventListener {
                             break;
                         }
                         
-                        let delay = config.reconnect_interval * 2u64.pow(reconnect_attempts - 1);
-                        let max_delay = 300; // Max 5 minutes
-                        let delay = std::cmp::min(delay, max_delay);
+                        // Use fixed short delay for fast reconnection instead of exponential backoff
+                        let delay = config.reconnect_interval;
                         
                         warn!("🔄 Reconnection attempt {} of {}. Waiting {} seconds before retry...", 
                              reconnect_attempts, config.max_reconnect_attempts, delay);
@@ -215,9 +220,9 @@ impl SolanaEventListener {
                             return;
                         }
                         
+                        info!("🔄 Starting reconnection attempt {} with {} second delay", reconnect_attempts, delay);
+                        
                         // Attempt to reconnect  
-                        // Note: We don't pass reconnect_sender here to avoid infinite recursion
-                        // If this reconnection fails, we'll try again in the next iteration
                         // Create a new processed_signatures set for reconnection
                         let reconnect_processed_sigs = Arc::new(tokio::sync::RwLock::new(HashSet::new()));
                         match Self::connect_websocket_internal(
@@ -225,7 +230,7 @@ impl SolanaEventListener {
                             &client,
                             &event_parser,
                             &event_sender,
-                            &None, // Don't trigger more reconnect signals from here
+                            &None, // Don't pass reconnect_sender to avoid triggering immediate reconnect on failure
                             &should_stop,
                             &reconnect_processed_sigs,
                         ).await {
@@ -235,14 +240,21 @@ impl SolanaEventListener {
                                 break; // Exit the reconnection loop, wait for next signal
                             }
                             Err(e) => {
-                                error!("❌ Reconnection attempt {} failed: {}", reconnect_attempts, e);
+                                error!("❌ Reconnection attempt {}/{} failed: {}", reconnect_attempts, config.max_reconnect_attempts, e);
+                                
+                                // If we've exhausted all attempts, wait for a new signal
+                                if reconnect_attempts >= config.max_reconnect_attempts {
+                                    error!("❌ All reconnection attempts exhausted. Waiting for new connection signal.");
+                                    reconnect_attempts = 0; // Reset for next signal
+                                    break;
+                                }
                                 // Continue the loop to try again
                             }
                         }
                     }
                 }
                 
-                info!("🔄 Reconnection handler stopped");
+                error!("🔄 Reconnection handler stopped unexpectedly! This should not happen.");
             });
         }
         
@@ -288,7 +300,7 @@ impl SolanaEventListener {
                     "mentions": [config.program_id]
                 },
                 {
-                    "commitment": "processed" // processed finalized confirmed
+                    "commitment": config.commitment
                 }
             ]
         });
@@ -305,6 +317,45 @@ impl SolanaEventListener {
         let should_stop = Arc::clone(should_stop);
         let client = Arc::clone(client);
         let processed_signatures = Arc::clone(processed_signatures);
+        
+        // Share the write half between message handler and ping task
+        let shared_writer = Arc::new(Mutex::new(write));
+        
+        // Create a channel to notify ping task when connection is closed
+        let (ping_stop_sender, mut ping_stop_receiver) = mpsc::unbounded_channel::<()>();
+        
+        // Start ping task to keep connection alive
+        let ping_should_stop = Arc::clone(&should_stop);
+        let ping_writer = Arc::clone(&shared_writer);
+        let ping_config = config.clone();
+        tokio::spawn(async move {
+            info!("💓 Starting WebSocket ping task (every {} seconds)", ping_config.ping_interval_seconds);
+            let mut ping_interval = tokio::time::interval(Duration::from_secs(ping_config.ping_interval_seconds));
+            ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            
+            loop {
+                tokio::select! {
+                    _ = ping_interval.tick() => {
+                        if *ping_should_stop.read().await {
+                            info!("💓 Ping task received stop signal");
+                            break;
+                        }
+                        
+                        debug!("💓 Sending ping to keep WebSocket alive");
+                        let mut writer = ping_writer.lock().await;
+                        if let Err(e) = writer.send(Message::Ping(vec![])).await {
+                            warn!("💓 Failed to send ping: {}, stopping ping task", e);
+                            break;
+                        }
+                    }
+                    _ = ping_stop_receiver.recv() => {
+                        info!("💓 Ping task received connection close notification");
+                        break;
+                    }
+                }
+            }
+            info!("💓 Ping task stopped");
+        });
         
         tokio::spawn(async move {
             info!("🎧 Started listening to WebSocket messages");
@@ -329,32 +380,59 @@ impl SolanaEventListener {
                         }
                     }
                     Ok(Message::Close(_)) => {
-                        warn!("WebSocket connection closed, triggering reconnect");
+                        warn!("🎧 WebSocket connection closed, stopping ping task and triggering reconnect");
+                        
+                        // Notify ping task to stop
+                        let _ = ping_stop_sender.send(());
+                        
                         // Connection closed - trigger reconnection unless we're stopping
                         if !*should_stop.read().await {
                             if let Some(sender) = &reconnect_sender {
+                                info!("📡 Sending reconnect signal due to connection close");
                                 if let Err(e) = sender.send(()) {
                                     error!("Failed to send reconnect signal: {}", e);
+                                } else {
+                                    info!("✅ Reconnect signal sent successfully");
                                 }
+                            } else {
+                                warn!("⚠️ Reconnect sender is None (likely during reconnection), connection will be retried by reconnection handler");
                             }
+                        } else {
+                            info!("Stop signal is active, skipping reconnection");
                         }
                         break;
                     }
                     Ok(Message::Ping(data)) => {
-                        debug!("Received Ping: {:?}", data);
+                        debug!("🏓 Received Ping from server, responding with Pong");
+                        // Respond to ping with pong
+                        let mut writer = shared_writer.lock().await;
+                        if let Err(e) = writer.send(Message::Pong(data)).await {
+                            warn!("Failed to send pong response: {}", e);
+                        }
                     }
-                    Ok(Message::Pong(data)) => {
-                        debug!("Received Pong: {:?}", data);
+                    Ok(Message::Pong(_data)) => {
+                        debug!("🏓 Received Pong from server - connection is alive");
                     }
                     Err(e) => {
-                        error!("WebSocket error: {}, triggering reconnect", e);
+                        error!("🎧 WebSocket error: {}, stopping ping task and triggering reconnect", e);
+                        
+                        // Notify ping task to stop
+                        let _ = ping_stop_sender.send(());
+                        
                         // WebSocket error - trigger reconnection unless we're stopping
                         if !*should_stop.read().await {
                             if let Some(sender) = &reconnect_sender {
+                                info!("📡 Sending reconnect signal due to WebSocket error: {}", e);
                                 if let Err(send_err) = sender.send(()) {
                                     error!("Failed to send reconnect signal: {}", send_err);
+                                } else {
+                                    info!("✅ Reconnect signal sent successfully");
                                 }
+                            } else {
+                                warn!("⚠️ Reconnect sender is None (likely during reconnection), connection will be retried by reconnection handler");
                             }
+                        } else {
+                            info!("Stop signal is active, skipping reconnection");
                         }
                         break;
                     }
@@ -363,6 +441,9 @@ impl SolanaEventListener {
                     }
                 }
             }
+            
+            // When message listener ends, always notify ping task to stop
+            let _ = ping_stop_sender.send(());
             warn!("🎧 WebSocket message listener ended");
         });
 
@@ -407,6 +488,17 @@ impl SolanaEventListener {
                             return Ok(());
                         }
                     };
+                    
+                    // 检查交易是否成功执行
+                    let transaction_error = value.get("err");
+                    let is_transaction_success = transaction_error.is_none() || transaction_error == Some(&Value::Null);
+                    
+                    if !is_transaction_success {
+                        warn!("❌ Transaction {} failed with error: {:?} - SKIPPING processing", signature, transaction_error);
+                        return Ok(());  // 出错的消息直接跳过，不做任何处理
+                    }
+                    
+                    debug!("✅ Transaction {} executed successfully", signature);
                     
                     // 检查是否已处理过这个签名
                     {
@@ -610,13 +702,21 @@ impl SolanaEventListener {
     
     /// Get connection health status
     pub async fn get_connection_health(&self) -> serde_json::Value {
+        let processed_count = self.processed_signatures.read().await.len();
+        let reconnect_sender_active = self.reconnect_sender.is_some();
+        let event_sender_active = self.event_sender.is_some();
+        
         serde_json::json!({
             "is_running": self.is_running,
             "reconnect_attempts": self.reconnect_attempts,
             "max_reconnect_attempts": self.config.max_reconnect_attempts,
             "should_stop": *self.should_stop.read().await,
             "ws_url": self.config.ws_url,
-            "program_id": self.config.program_id
+            "program_id": self.config.program_id,
+            "processed_signatures_count": processed_count,
+            "reconnect_sender_active": reconnect_sender_active,
+            "event_sender_active": event_sender_active,
+            "reconnect_interval": self.config.reconnect_interval
         })
     }
 }

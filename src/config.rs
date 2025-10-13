@@ -33,6 +33,7 @@ pub struct SolanaConfig {
     pub ws_url: String,
     pub program_id: String,
     pub enable_event_listener: bool,
+    pub commitment: String,
     #[allow(dead_code)]
     pub reconnect_interval: u64,
     #[allow(dead_code)]
@@ -41,6 +42,8 @@ pub struct SolanaConfig {
     pub event_buffer_size: usize,
     #[allow(dead_code)]
     pub event_batch_size: usize,
+    #[allow(dead_code)]
+    pub ping_interval_seconds: u64,
 }
 
 #[derive(Debug, Deserialize, Clone)]
