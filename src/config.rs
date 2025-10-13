@@ -8,6 +8,7 @@ pub struct Config {
     pub logging: LoggingConfig,
     pub solana: SolanaConfig,
     pub database: DatabaseConfig,
+    pub ipfs: IpfsConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -49,6 +50,14 @@ pub struct SolanaConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct DatabaseConfig {
     pub rocksdb_path: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct IpfsConfig {
+    pub gateway_url: String,
+    pub request_timeout_seconds: u64,
+    pub max_retries: u32,
+    pub retry_delay_seconds: u64,
 }
 
 impl Config {

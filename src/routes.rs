@@ -25,7 +25,9 @@ use crate::config::Config;
         handlers::query_orders,
         handlers::query_user_transactions,
         handlers::query_user_orders,
+        handlers::test_ipfs_functionality,
         handlers::query_mint_details,
+        handlers::query_kline_data,
     ),
     components(
         schemas(
@@ -41,6 +43,8 @@ use crate::config::Config;
             handlers::OrderQueryParams,
             handlers::UserQueryParams,
             handlers::MintDetailsQueryParams,
+            handlers::TestIpfsParams,
+            handlers::KlineQueryParams,
             crate::services::EventQueryResponse,
             crate::services::MintQueryResponse,
             crate::services::OrderQueryResponse,
@@ -101,6 +105,9 @@ pub fn create_router(config: &Config, app_state: Arc<AppState>) -> Router {
         
         // User order query routes
         .route("/api/user_orders", get(handlers::query_user_orders))
+        
+        // Test IPFS functionality
+        .route("/api/test-ipfs", post(handlers::test_ipfs_functionality))
         
         // OpenAPI specification
         .route("/api-docs/openapi.json", get(serve_openapi))
@@ -183,13 +190,36 @@ fn create_cors_layer(allow_origins: &[String]) -> CorsLayer {
     if allow_origins.contains(&"*".to_string()) {
         CorsLayer::new()
             .allow_origin(Any)
-            .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
+            .allow_methods([
+                Method::GET, 
+                Method::POST, 
+                Method::PUT, 
+                Method::DELETE, 
+                Method::OPTIONS,
+                Method::HEAD,
+                Method::PATCH
+            ])
             .allow_headers([
                 HeaderName::from_static("content-type"),
                 HeaderName::from_static("authorization"),
                 HeaderName::from_static("accept"),
+                HeaderName::from_static("accept-language"),
+                HeaderName::from_static("content-language"),
+                HeaderName::from_static("origin"),
+                HeaderName::from_static("user-agent"),
+                HeaderName::from_static("cache-control"),
+                HeaderName::from_static("pragma"),
+                HeaderName::from_static("x-requested-with"),
+                HeaderName::from_static("access-control-request-method"),
+                HeaderName::from_static("access-control-request-headers"),
+            ])
+            .expose_headers([
+                HeaderName::from_static("content-length"),
+                HeaderName::from_static("content-type"),
+                HeaderName::from_static("access-control-allow-origin"),
             ])
             .allow_credentials(false)
+            .max_age(std::time::Duration::from_secs(86400)) // 24 hours
     } else {
         let origins: Vec<_> = allow_origins
             .iter()
@@ -198,12 +228,35 @@ fn create_cors_layer(allow_origins: &[String]) -> CorsLayer {
         
         CorsLayer::new()
             .allow_origin(origins)
-            .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
+            .allow_methods([
+                Method::GET, 
+                Method::POST, 
+                Method::PUT, 
+                Method::DELETE, 
+                Method::OPTIONS,
+                Method::HEAD,
+                Method::PATCH
+            ])
             .allow_headers([
                 HeaderName::from_static("content-type"),
                 HeaderName::from_static("authorization"),
                 HeaderName::from_static("accept"),
+                HeaderName::from_static("accept-language"),
+                HeaderName::from_static("content-language"),
+                HeaderName::from_static("origin"),
+                HeaderName::from_static("user-agent"),
+                HeaderName::from_static("cache-control"),
+                HeaderName::from_static("pragma"),
+                HeaderName::from_static("x-requested-with"),
+                HeaderName::from_static("access-control-request-method"),
+                HeaderName::from_static("access-control-request-headers"),
+            ])
+            .expose_headers([
+                HeaderName::from_static("content-length"),
+                HeaderName::from_static("content-type"),
+                HeaderName::from_static("access-control-allow-origin"),
             ])
             .allow_credentials(true)
+            .max_age(std::time::Duration::from_secs(86400)) // 24 hours
     }
 } 
