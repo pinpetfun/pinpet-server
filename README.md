@@ -1,12 +1,12 @@
-# Spin Server
+# PinPet Server
 
 ## Project Overview
 
-Spin Server is a Rust-based server application designed to monitor and process Spin Pet program events on the Solana blockchain, providing related API services. The project integrates Solana blockchain data, uses RocksDB for local data storage, and provides data access interfaces for frontend applications through RESTful APIs.
+PinPet Server is a Rust-based server application designed to monitor and process PinPet Pet program events on the Solana blockchain, providing related API services. The project integrates Solana blockchain data, uses RocksDB for local data storage, and provides data access interfaces for frontend applications through RESTful APIs.
 
 ## Core Features 
 
-- **Solana Event Monitoring**: Real-time monitoring of Spin Pet program events on the Solana blockchain
+- **Solana Event Monitoring**: Real-time monitoring of PinPet Pet program events on the Solana blockchain
 - **Event Data Storage**: Efficient storage and indexing of blockchain event data using RocksDB
 - **RESTful API**: Rich API interfaces supporting queries for events, tokens, orders, and user transactions
 - **Swagger Documentation**: Integrated Swagger UI, providing interactive API documentation
@@ -99,7 +99,7 @@ classDiagram
 
 ## Event Types
 
-Spin Server monitors and processes the following types of Solana events:
+PinPet Server monitors and processes the following types of Solana events:
 
 1. **Token Creation Event** (TokenCreated): Records information about new token creation
 2. **Buy/Sell Event** (BuySell): Records token trading transactions
@@ -231,7 +231,7 @@ Query all events for a specific token.
         "payer": "3DJDXsrM1mCvzuJMCBJGLAHZRhKz37JaNw7zEMWf1A5G",
         "mint_account": "Fmt6DE83ytByYxQGaKTF3NWGhxoh8rRpTKoBRhBs8ZCg",
         "curve_account": "DvvV21g2zBxGgLnWwe3JgfnKL7YhJJxRQWz24XLRG5jt",
-        "name": "Spin Pet Token",
+        "name": "PinPet Pet Token",
         "symbol": "SPT",
         "uri": "https://example.com/token.json",
         "timestamp": "2023-08-15T12:30:45.123Z",
