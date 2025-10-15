@@ -28,6 +28,7 @@ use crate::config::Config;
         handlers::test_ipfs_functionality,
         handlers::query_mint_details,
         handlers::query_kline_data,
+        handlers::get_kline_status,
     ),
     components(
         schemas(
@@ -54,6 +55,8 @@ use crate::config::Config;
             crate::services::UserOrderQueryResponse,
             crate::services::MintDetailsQueryResponse,
             crate::services::MintDetailData,
+            KlineData,
+            KlineQueryResponse,
             crate::solana::SpinPetEvent,
             crate::solana::TokenCreatedEvent,
             crate::solana::BuySellEvent,
@@ -68,7 +71,8 @@ use crate::config::Config;
         (name = "events", description = "Event monitoring APIs"),
         (name = "mints", description = "Mint query APIs"),
         (name = "orders", description = "Order query APIs"),
-        (name = "user", description = "User transaction query APIs")
+        (name = "user", description = "User transaction query APIs"),
+        (name = "kline", description = "Kline data query APIs")
     ),
     info(
         title = "Spin API Service",
@@ -105,6 +109,10 @@ pub fn create_router(config: &Config, app_state: Arc<AppState>) -> Router {
         
         // User order query routes
         .route("/api/user_orders", get(handlers::query_user_orders))
+        
+        // Kline query routes
+        .route("/api/kline", get(handlers::query_kline_data))
+        .route("/api/kline/status", get(handlers::get_kline_status))
         
         // Test IPFS functionality
         .route("/api/test-ipfs", post(handlers::test_ipfs_functionality))

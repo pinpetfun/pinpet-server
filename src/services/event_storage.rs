@@ -21,9 +21,9 @@ pub const EVENT_TYPE_FULL_CLOSE: &str = "fc";
 pub const EVENT_TYPE_PARTIAL_CLOSE: &str = "pc";
 pub const EVENT_TYPE_MILESTONE_DISCOUNT: &str = "md";
 
-/// Kline interval constants - used for key generation (2 characters to save space)
+/// Kline interval constants - used for key generation (2-3 characters to save space)
 pub const KLINE_INTERVAL_1S: &str = "s1";
-pub const KLINE_INTERVAL_1M: &str = "m1";
+pub const KLINE_INTERVAL_30S: &str = "s30";
 pub const KLINE_INTERVAL_5M: &str = "m5";
 
 /// Precision constant for u128 to f64 conversion (28 decimal places)
@@ -175,7 +175,7 @@ pub struct UserQuery {
     pub order_by: Option<String>, // "slot_asc" or "slot_desc"
 }
 
-/// User transaction query response
+/// User transaction query response  
 #[derive(Debug, Serialize, Deserialize, Default, utoipa::ToSchema)]
 pub struct UserQueryResponse {
     pub transactions: Vec<UserTransactionData>,
@@ -423,11 +423,20 @@ impl EventStorage {
     }
 
     /// Calculate time bucket for different intervals
+    /// Returns the aligned timestamp for the time bucket
     fn calculate_time_bucket(&self, timestamp: u64, interval: &str) -> u64 {
         match interval {
-            KLINE_INTERVAL_1S => timestamp, // 1-second intervals
-            KLINE_INTERVAL_1M => timestamp / 60, // 1-minute intervals
-            KLINE_INTERVAL_5M => timestamp / 300, // 5-minute intervals (300 seconds)
+            KLINE_INTERVAL_1S => timestamp, // 1-second intervals - no alignment needed
+            KLINE_INTERVAL_30S => {
+                // 30-second intervals - align to 30-second boundary
+                // Floor timestamp to 30-second boundary, then return the aligned timestamp
+                (timestamp / 30) * 30
+            },
+            KLINE_INTERVAL_5M => {
+                // 5-minute intervals - align to 5-minute boundary
+                // Floor timestamp to 5-minute boundary, then return the aligned timestamp
+                (timestamp / 300) * 300
+            },
             _ => timestamp, // default to 1-second
         }
     }
@@ -559,14 +568,14 @@ impl EventStorage {
         let price = self.convert_price_to_f64(latest_price);
         let unix_timestamp = timestamp.timestamp() as u64;
         
-        let intervals = [KLINE_INTERVAL_1S, KLINE_INTERVAL_1M, KLINE_INTERVAL_5M];
+        let intervals = [KLINE_INTERVAL_1S, KLINE_INTERVAL_30S, KLINE_INTERVAL_5M];
         
         for interval in intervals {
             let time_bucket = self.calculate_time_bucket(unix_timestamp, interval);
             let kline_key = self.generate_kline_key(interval, mint_account, time_bucket);
             
             // Try to get existing kline data
-            let mut kline_data = match self.db.get(kline_key.as_bytes())? {
+            let kline_data = match self.db.get(kline_key.as_bytes())? {
                 Some(data) => {
                     match serde_json::from_slice::<KlineData>(&data) {
                         Ok(mut existing_kline) => {
@@ -1533,8 +1542,8 @@ impl EventStorage {
         let order_by = query.order_by.unwrap_or_else(|| "time_desc".to_string());
         
         // Validate interval
-        if !matches!(interval.as_str(), "s1" | "m1" | "m5") {
-            return Err(anyhow::anyhow!("Invalid interval: {}, must be one of: s1, m1, m5", interval));
+        if !matches!(interval.as_str(), "s1" | "s30" | "m5") {
+            return Err(anyhow::anyhow!("Invalid interval: {}, must be one of: s1, s30, m5", interval));
         }
         
         debug!("🔍 Querying kline data, mint: {}, interval: {}, page: {}, limit: {}, order: {}", 
@@ -1655,6 +1664,14 @@ mod tests {
                 request_timeout_seconds: 30,
                 max_retries: 3,
                 retry_delay_seconds: 5,
+            },
+            kline: crate::config::KlineServiceConfig {
+                enable_kline_service: false,
+                connection_timeout_secs: 60,
+                max_subscriptions_per_client: 100,
+                history_data_limit: 100,
+                ping_interval_secs: 25,
+                ping_timeout_secs: 60,
             },
         };
         

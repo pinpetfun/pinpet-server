@@ -27,6 +27,9 @@ pub trait EventListener {
 #[async_trait]
 pub trait EventHandler: Send + Sync {
     async fn handle_event(&self, event: SpinPetEvent) -> anyhow::Result<()>;
+    
+    /// Downcast support for trait objects
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 /// Default event handler - simply print events
@@ -104,6 +107,10 @@ impl EventHandler for DefaultEventHandler {
             }
         }
         Ok(())
+    }
+    
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
@@ -378,6 +385,7 @@ impl SolanaEventListener {
                         &event_broadcaster_clone,
                         &client_clone,
                         &processed_signatures_clone,
+                        config,
                     ).await {
                         error!("Failed to process WebSocket message: {}", e);
                     }
@@ -421,6 +429,7 @@ impl SolanaEventListener {
         event_broadcaster: &broadcast::Sender<SpinPetEvent>,
         client: &Arc<SolanaClient>,
         processed_signatures: &Arc<tokio::sync::RwLock<HashSet<String>>>,
+        config: &SolanaConfig,
     ) -> anyhow::Result<()> {
         debug!("📨 Processing WebSocket message");
         
@@ -456,8 +465,19 @@ impl SolanaEventListener {
                     let is_transaction_success = transaction_error.is_none() || transaction_error == Some(&Value::Null);
                     
                     if !is_transaction_success {
-                        warn!("❌ Transaction {} failed - skipping", signature);
-                        return Ok(());
+                        if let Some(error_detail) = transaction_error {
+                            debug!("❌ Transaction {} failed with error: {}", signature, error_detail);
+                        } else {
+                            debug!("❌ Transaction {} failed with unknown error", signature);
+                        }
+                        
+                        // Skip failed transactions unless explicitly configured to process them
+                        if !config.process_failed_transactions {
+                            debug!("⏭️ Skipping failed transaction {} (process_failed_transactions=false)", signature);
+                            return Ok(());
+                        } else {
+                            debug!("🔄 Processing failed transaction {} (process_failed_transactions=true)", signature);
+                        }
                     }
                     
                     // Check if already processed

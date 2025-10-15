@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use std::env;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)] 
 pub struct Config {
     pub server: ServerConfig,
     pub cors: CorsConfig,
@@ -9,6 +9,7 @@ pub struct Config {
     pub solana: SolanaConfig,
     pub database: DatabaseConfig,
     pub ipfs: IpfsConfig,
+    pub kline: KlineServiceConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -45,6 +46,9 @@ pub struct SolanaConfig {
     pub event_batch_size: usize,
     #[allow(dead_code)]
     pub ping_interval_seconds: u64,
+    /// Whether to process failed transactions for development/testing (default: false)
+    #[serde(default)]
+    pub process_failed_transactions: bool,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -58,6 +62,16 @@ pub struct IpfsConfig {
     pub request_timeout_seconds: u64,
     pub max_retries: u32,
     pub retry_delay_seconds: u64,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct KlineServiceConfig {
+    pub enable_kline_service: bool,
+    pub connection_timeout_secs: u64,
+    pub max_subscriptions_per_client: usize,
+    pub history_data_limit: usize,
+    pub ping_interval_secs: u64,
+    pub ping_timeout_secs: u64,
 }
 
 impl Config {
