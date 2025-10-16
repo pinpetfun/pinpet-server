@@ -5,7 +5,7 @@
     "version": "0.1.0",
     "spec": "0.1.0",
     "description": "Created with Anchor"
-  },  
+  },
   "instructions": [
     {
       "name": "buy",
@@ -271,11 +271,6 @@
           "name": "order8",
           "writable": true,
           "optional": true
-        },
-        {
-          "name": "order9",
-          "writable": true,
-          "optional": true
         }
       ],
       "args": [
@@ -486,11 +481,6 @@
         },
         {
           "name": "order8",
-          "writable": true,
-          "optional": true
-        },
-        {
-          "name": "order9",
           "writable": true,
           "optional": true
         }
@@ -719,11 +709,6 @@
         },
         {
           "name": "order8",
-          "writable": true,
-          "optional": true
-        },
-        {
-          "name": "order9",
           "writable": true,
           "optional": true
         }
@@ -1213,11 +1198,6 @@
           "name": "order8",
           "writable": true,
           "optional": true
-        },
-        {
-          "name": "order9",
-          "writable": true,
-          "optional": true
         }
       ],
       "args": [
@@ -1517,11 +1497,6 @@
           "name": "order8",
           "writable": true,
           "optional": true
-        },
-        {
-          "name": "order9",
-          "writable": true,
-          "optional": true
         }
       ],
       "args": [
@@ -1765,11 +1740,6 @@
         },
         {
           "name": "order8",
-          "writable": true,
-          "optional": true
-        },
-        {
-          "name": "order9",
           "writable": true,
           "optional": true
         }
@@ -2143,7 +2113,7 @@
     },
     {
       "code": 6001,
-      "name": "CalculationFailure",
+      "name": "ArithmeticOverflow",
       "msg": "计算溢出错误"
     },
     {
@@ -2208,223 +2178,448 @@
     },
     {
       "code": 6014,
+      "name": "InitialPriceCalculationError",
+      "msg": "初始价格计算失败"
+    },
+    {
+      "code": 6015,
+      "name": "BuyReserveRecalculationError",
+      "msg": "储备量重算失败（买入后）"
+    },
+    {
+      "code": 6016,
+      "name": "SellReserveRecalculationError",
+      "msg": "储备量重算失败（卖出后）"
+    },
+    {
+      "code": 6017,
+      "name": "TotalAmountWithFeeError",
+      "msg": "含手续费总额计算失败"
+    },
+    {
+      "code": 6018,
+      "name": "AmountAfterFeeError",
+      "msg": "扣费后金额计算失败"
+    },
+    {
+      "code": 6019,
+      "name": "BuyPriceRangeCalculationError",
+      "msg": "买入价格区间计算失败"
+    },
+    {
+      "code": 6020,
+      "name": "SellPriceRangeCalculationError",
+      "msg": "卖出价格区间计算失败"
+    },
+    {
+      "code": 6021,
+      "name": "EmptyOrdersCalculationError",
+      "msg": "订单数组为空，无法计算"
+    },
+    {
+      "code": 6022,
+      "name": "FinalOrderEmptyError",
+      "msg": "最终订单索引对应订单为空"
+    },
+    {
+      "code": 6023,
+      "name": "RemainingRangeCalculationError",
+      "msg": "剩余区间交易计算失败"
+    },
+    {
+      "code": 6024,
+      "name": "FullRangeCalculationError",
+      "msg": "全区间交易计算失败"
+    },
+    {
+      "code": 6025,
+      "name": "OrderIndexOutOfBoundsCalculationError",
+      "msg": "订单索引越界"
+    },
+    {
+      "code": 6026,
+      "name": "BuyFromPriceWithTokenNoneError",
+      "msg": "曲线函数返回None：buy_from_price_with_token_output"
+    },
+    {
+      "code": 6027,
+      "name": "SellFromPriceWithTokenNoneError",
+      "msg": "曲线函数返回None：sell_from_price_with_token_input"
+    },
+    {
+      "code": 6028,
       "name": "ExceedsMaxSolAmount",
       "msg": "用户设置的最大SOL可使用金额不足"
     },
     {
-      "code": 6015,
+      "code": 6029,
       "name": "InsufficientTokenOutput",
       "msg": "获得的代币数量不足"
     },
     {
-      "code": 6016,
+      "code": 6030,
       "name": "InsufficientTokenBalance",
       "msg": "代币余额不足"
     },
     {
-      "code": 6017,
+      "code": 6031,
       "name": "InsufficientSolOutput",
       "msg": "获得的SOL数量不足"
     },
     {
-      "code": 6018,
+      "code": 6032,
       "name": "InsufficientRepayment",
       "msg": "平仓收益不足以偿还借款"
     },
     {
-      "code": 6019,
+      "code": 6033,
       "name": "InsufficientBorrowingReserve",
       "msg": "借款请求超过可用储备"
     },
     {
-      "code": 6020,
+      "code": 6034,
       "name": "InsufficientTokenSale",
       "msg": "实际卖出的代币数量不足"
     },
     {
-      "code": 6021,
+      "code": 6035,
       "name": "InsufficientLiquidity",
       "msg": "当前订单可提供的流动性不足"
     },
     {
-      "code": 6022,
+      "code": 6036,
       "name": "TokenAmountDifferenceOutOfRange",
       "msg": "保证金交易时,区间计算误差值太大"
     },
     {
-      "code": 6023,
-      "name": "ArithmeticOverflow",
-      "msg": "计算过程中发生数学溢出"
-    },
-    {
-      "code": 6024,
+      "code": 6037,
       "name": "BorrowAmountMismatch",
       "msg": "借款金额与锁定代币数量不匹配"
     },
     {
-      "code": 6025,
+      "code": 6038,
       "name": "CloseFeeCalculationError",
       "msg": "平仓手续费计算错误"
     },
     {
-      "code": 6026,
+      "code": 6039,
       "name": "InsufficientCloseProfit",
       "msg": "平仓收益不足"
     },
     {
-      "code": 6027,
+      "code": 6040,
       "name": "CloseTransferError",
       "msg": "平仓转账错误"
     },
     {
-      "code": 6028,
+      "code": 6041,
       "name": "UpHeadNotEmpty",
       "msg": "上涨链表头不为空，而客户端传入空值,无法进行普通买入交易"
     },
     {
-      "code": 6029,
+      "code": 6042,
       "name": "DownHeadNotEmpty",
       "msg": "下跌链表头不为空，而客户端传入空值,无法进行普通卖出交易"
     },
     {
-      "code": 6030,
+      "code": 6043,
       "name": "UpHeadOrderMismatch",
       "msg": "上涨链表头与orders[0]不匹配"
     },
     {
-      "code": 6031,
+      "code": 6044,
       "name": "DownHeadOrderMismatch",
       "msg": "下跌链表头与orders[0]不匹配"
     },
     {
-      "code": 6032,
+      "code": 6045,
       "name": "InsufficientMargin",
       "msg": "保证金不足"
     },
     {
-      "code": 6033,
+      "code": 6046,
       "name": "InsufficientMinimumMargin",
       "msg": "保证金低于最小限制"
     },
     {
-      "code": 6034,
+      "code": 6047,
       "name": "InvalidAccountOwner",
       "msg": "账户所有者不正确"
     },
     {
-      "code": 6035,
+      "code": 6048,
       "name": "AccountBorrowFailed",
       "msg": "账户借用失败"
     },
     {
-      "code": 6036,
+      "code": 6049,
       "name": "SellAmountExceedsOrderAmount",
       "msg": "卖出数量超过订单持有的代币数量"
     },
     {
-      "code": 6037,
+      "code": 6050,
       "name": "OrderNotExpiredMustCloseByOwner",
       "msg": "未超时订单必须由开仓者平仓"
     },
     {
-      "code": 6038,
+      "code": 6051,
       "name": "SettlementAddressMustBeOwnerAddress",
       "msg": "结算地址必须是开仓地址"
     },
     {
-      "code": 6039,
+      "code": 6052,
       "name": "BuyAmountExceedsOrderAmount",
       "msg": "买入数量超过订单持有的代币数量"
     },
     {
-      "code": 6040,
+      "code": 6053,
       "name": "InsufficientTradeAmount",
       "msg": "交易数量低于最小限制"
     },
     {
-      "code": 6041,
+      "code": 6054,
       "name": "RemainingTokenAmountTooSmall",
       "msg": "剩余代币数量低于最小交易限制"
     },
     {
-      "code": 6042,
+      "code": 6055,
       "name": "PriceCalculationError",
       "msg": "价格计算错误"
     },
     {
-      "code": 6043,
+      "code": 6056,
       "name": "InvalidFeeRecipientAccount",
       "msg": "手续费接收账户地址不匹配"
     },
     {
-      "code": 6044,
+      "code": 6057,
       "name": "InvalidOrderMintAddress",
       "msg": "订单mint地址与curve账户mint不匹配"
     },
     {
-      "code": 6045,
+      "code": 6058,
       "name": "InsufficientStopLossLiquidity",
       "msg": "止损单预留流动性不足"
     },
     {
-      "code": 6046,
+      "code": 6059,
       "name": "InvalidOrderIndex",
       "msg": "无效的订单索引"
     },
     {
-      "code": 6047,
+      "code": 6060,
       "name": "InvalidFeePercentage",
       "msg": "手续费分配比例必须在0-100之间"
     },
     {
-      "code": 6048,
+      "code": 6061,
       "name": "InvalidLpPairsCount",
       "msg": "LP配对数组长度必须等于MAX_ORDERS_COUNT"
     },
     {
-      "code": 6049,
+      "code": 6062,
       "name": "InvalidStopLossPrice",
       "msg": "止损价格不满足最小间隔要求"
     },
     {
-      "code": 6050,
+      "code": 6063,
       "name": "InvalidOrderChainSequence",
       "msg": "ctx带入的,或强平时,链表顺序错乱"
     },
     {
-      "code": 6051,
+      "code": 6064,
       "name": "InvalidCloseOrderId",
       "msg": "无效的平仓订单ID"
     },
     {
-      "code": 6052,
+      "code": 6065,
       "name": "PartialCloseNotSupport",
       "msg": "暂时不支持部份平仓"
     },
     {
-      "code": 6053,
+      "code": 6066,
       "name": "DuplicateValidIndices",
       "msg": "获取多个可变引用时未越界的索引不能重复"
     },
     {
-      "code": 6054,
+      "code": 6067,
       "name": "NoProfitableFunds",
       "msg": "无盈利资金可转移"
     },
     {
-      "code": 6055,
+      "code": 6068,
       "name": "PositionAssetIsZero",
       "msg": "持仓资产为零"
     },
     {
-      "code": 6056,
+      "code": 6069,
       "name": "InvalidOrderType",
       "msg": "订单类型不匹配预期值"
     },
     {
-      "code": 6057,
+      "code": 6070,
       "name": "CloseOrderAddressMismatch",
       "msg": "平仓订单地址与实际地址不匹配"
+    },
+    {
+      "code": 6071,
+      "name": "InsufficientPoolFunds",
+      "msg": "池子资金不足"
+    },
+    {
+      "code": 6072,
+      "name": "LinkedListInsertNodeNotNew",
+      "msg": "插入节点非新节点，已有链接关系"
+    },
+    {
+      "code": 6073,
+      "name": "LinkedListInsertNodePrevBurnAddress",
+      "msg": "插入节点的前驱指向黑洞地址"
+    },
+    {
+      "code": 6074,
+      "name": "LinkedListInsertNodeNextBurnAddress",
+      "msg": "插入节点的后继指向黑洞地址"
+    },
+    {
+      "code": 6075,
+      "name": "LinkedListInsertEmptyHeadNotNone",
+      "msg": "空表插入但链表头部非空"
+    },
+    {
+      "code": 6076,
+      "name": "LinkedListInsertHeadNextNotHead",
+      "msg": "头节点插入时后继节点不是链表头"
+    },
+    {
+      "code": 6077,
+      "name": "LinkedListInsertHeadNextPrevNotNone",
+      "msg": "头节点插入时后继节点的前驱非空"
+    },
+    {
+      "code": 6078,
+      "name": "LinkedListInsertMiddlePrevNextMismatch",
+      "msg": "中间节点插入时前节点的next不指向后节点"
+    },
+    {
+      "code": 6079,
+      "name": "LinkedListInsertMiddleNextPrevMismatch",
+      "msg": "中间节点插入时后节点的prev不指向前节点"
+    },
+    {
+      "code": 6080,
+      "name": "LinkedListInsertTailPrevNextNotNone",
+      "msg": "尾节点插入时前节点的next不为空"
+    },
+    {
+      "code": 6081,
+      "name": "LinkedListInsertTailPrevPrevIsNone",
+      "msg": "尾节点插入时前节点的prev为空但前节点非链表头"
+    },
+    {
+      "code": 6082,
+      "name": "LinkedListUpCurrentOrderTypeInvalid",
+      "msg": "Up链表中当前订单的order_type必须是2(做空)"
+    },
+    {
+      "code": 6083,
+      "name": "LinkedListUpPrevOrderTypeInvalid",
+      "msg": "Up链表中前序订单的order_type必须是2(做空)"
+    },
+    {
+      "code": 6084,
+      "name": "LinkedListUpNextOrderTypeInvalid",
+      "msg": "Up链表中后继订单的order_type必须是2(做空)"
+    },
+    {
+      "code": 6085,
+      "name": "LinkedListDownCurrentOrderTypeInvalid",
+      "msg": "Down链表中当前订单的order_type必须是1(做多)"
+    },
+    {
+      "code": 6086,
+      "name": "LinkedListDownPrevOrderTypeInvalid",
+      "msg": "Down链表中前序订单的order_type必须是1(做多)"
+    },
+    {
+      "code": 6087,
+      "name": "LinkedListDownNextOrderTypeInvalid",
+      "msg": "Down链表中后继订单的order_type必须是1(做多)"
+    },
+    {
+      "code": 6088,
+      "name": "LinkedListRemoveNodePrevBurnAddress",
+      "msg": "删除节点的前驱指向黑洞地址"
+    },
+    {
+      "code": 6089,
+      "name": "LinkedListRemoveNodeNextBurnAddress",
+      "msg": "删除节点的后继指向黑洞地址"
+    },
+    {
+      "code": 6090,
+      "name": "LinkedListRemoveSingleNotHead",
+      "msg": "删除单节点时该节点不是链表头"
+    },
+    {
+      "code": 6091,
+      "name": "LinkedListRemoveSingleLinksNotNone",
+      "msg": "删除单节点时节点的前后链接必须为空"
+    },
+    {
+      "code": 6092,
+      "name": "LinkedListRemoveHeadNotHead",
+      "msg": "删除头节点时该节点不是链表头"
+    },
+    {
+      "code": 6093,
+      "name": "LinkedListRemoveHeadLinksInvalid",
+      "msg": "删除头节点时链接关系不正确(前驱应为空,后继应指向next)"
+    },
+    {
+      "code": 6094,
+      "name": "LinkedListRemoveHeadNextPrevInvalid",
+      "msg": "删除头节点时后继节点的前驱不指向当前节点"
+    },
+    {
+      "code": 6095,
+      "name": "LinkedListRemoveTailNextNotNone",
+      "msg": "删除尾节点时节点的后继必须为空"
+    },
+    {
+      "code": 6096,
+      "name": "LinkedListRemoveTailPrevInvalid",
+      "msg": "删除尾节点时节点的前驱不指向prev节点"
+    },
+    {
+      "code": 6097,
+      "name": "LinkedListRemoveTailPrevNextInvalid",
+      "msg": "删除尾节点时前驱节点的后继不指向当前节点"
+    },
+    {
+      "code": 6098,
+      "name": "LinkedListRemoveMiddleLinksInvalid",
+      "msg": "删除中间节点时节点的链接关系不正确"
+    },
+    {
+      "code": 6099,
+      "name": "LinkedListRemoveMiddlePrevNextInvalid",
+      "msg": "删除中间节点时前驱节点的后继不指向当前节点"
+    },
+    {
+      "code": 6100,
+      "name": "LinkedListRemoveMiddleNextPrevInvalid",
+      "msg": "删除中间节点时后继节点的前驱不指向当前节点"
+    },
+    {
+      "code": 6101,
+      "name": "LinkedListForceLiquidateStateInvalid",
+      "msg": "强制清算时链表状态无效"
+    },
+    {
+      "code": 6102,
+      "name": "LinkedListForceLiquidateSequenceInvalid",
+      "msg": "强制清算过程中链表顺序错误"
     }
   ],
   "types": [
@@ -2782,6 +2977,10 @@
             "type": "u32"
           },
           {
+            "name": "margin_init_sol_amount",
+            "type": "u64"
+          },
+          {
             "name": "margin_sol_amount",
             "type": "u64"
           },
@@ -2798,12 +2997,12 @@
             "type": "u16"
           },
           {
-            "name": "short_fee_amount",
-            "type": "u64"
-          },
-          {
             "name": "open_price",
             "type": "u128"
+          },
+          {
+            "name": "realized_sol_amount",
+            "type": "u64"
           },
           {
             "name": "bump",
@@ -2958,6 +3157,10 @@
             "type": "u32"
           },
           {
+            "name": "margin_init_sol_amount",
+            "type": "u64"
+          },
+          {
             "name": "margin_sol_amount",
             "type": "u64"
           },
@@ -2972,6 +3175,10 @@
           {
             "name": "borrow_fee",
             "type": "u16"
+          },
+          {
+            "name": "realized_sol_amount",
+            "type": "u64"
           }
         ]
       }

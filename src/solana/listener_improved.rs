@@ -13,6 +13,9 @@ use tokio::time::{interval, sleep, Duration};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
+use tokio::fs::OpenOptions;
+use tokio::io::AsyncWriteExt;
+use chrono;
 
 /// Event listener trait
 #[async_trait]
@@ -154,6 +157,39 @@ pub struct SolanaEventListener {
 }
 
 impl SolanaEventListener {
+    /// Log raw Solana message to separate file for debugging
+    async fn log_raw_message(message: &str, config: &SolanaConfig) {
+        if !config.enable_raw_message_logging {
+            return;
+        }
+
+        let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f UTC");
+        let log_line = format!("[{}] {}\n", timestamp, message);
+        
+        // Create logs directory if it doesn't exist
+        if let Err(e) = tokio::fs::create_dir_all("logs").await {
+            warn!("Failed to create logs directory: {}", e);
+            return;
+        }
+
+        // Append to the raw messages log file
+        match OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("logs/solana_raw_messages.log")
+            .await
+        {
+            Ok(mut file) => {
+                if let Err(e) = file.write_all(log_line.as_bytes()).await {
+                    warn!("Failed to write raw message to log file: {}", e);
+                }
+            }
+            Err(e) => {
+                warn!("Failed to open raw messages log file: {}", e);
+            }
+        }
+    }
+
     /// Create a new event listener
     pub fn new(
         config: SolanaConfig,
@@ -407,6 +443,10 @@ impl SolanaEventListener {
             match msg {
                 Ok(Message::Text(text)) => {
                     debug!("📨 Received text message");
+                    
+                    // Log raw message if enabled
+                    Self::log_raw_message(&text, config).await;
+                    
                     if let Err(e) = Self::handle_websocket_message(
                         &text,
                         &event_parser_clone,

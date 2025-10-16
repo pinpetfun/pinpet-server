@@ -225,6 +225,24 @@ pub struct KlineHistoryResponse {
     pub total_count: usize,
 }
 
+/// 交易事件推送消息
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct EventUpdateMessage {
+    pub symbol: String,                  // mint_account
+    pub event_type: String,              // event type name
+    pub event_data: SpinPetEvent,        // complete event data
+    pub timestamp: u64,                  // push timestamp (milliseconds)
+}
+
+/// 历史交易事件响应
+#[derive(Debug, Serialize, ToSchema)]
+pub struct EventHistoryResponse {
+    pub symbol: String,
+    pub data: Vec<EventUpdateMessage>,
+    pub has_more: bool,
+    pub total_count: usize,
+}
+
 /// Socket.IO 请求消息
 #[derive(Debug, Deserialize)]
 pub struct SubscribeRequest {
@@ -350,6 +368,12 @@ impl KlineSocketService {
                                 socket.id, data.symbol, data.interval
                             );
 
+                            // Update client activity
+                            {
+                                let mut manager = subscriptions.write().await;
+                                manager.update_activity(&socket.id.to_string());
+                            }
+
                             // 验证订阅请求
                             if let Err(e) = validate_subscribe_request(&data) {
                                 let _ = socket.emit(
@@ -401,7 +425,7 @@ impl KlineSocketService {
                                 info!("📋 Total active connections: {}", manager.connections.len());
                             }
 
-                            // 推送历史数据
+                            // 推送历史K线数据
                             if let Ok(history) =
                                 get_kline_history(&event_storage, &data.symbol, &data.interval, 100)
                                     .await
@@ -420,6 +444,34 @@ impl KlineSocketService {
                                         }
                                     }
                                 }
+                            }
+
+                            // 推送历史交易事件数据 (300条)
+                            info!("📡 Sending historical event data for mint: {}", data.symbol);
+                            if let Ok(event_history) =
+                                get_event_history(&event_storage, &data.symbol, 300).await
+                            {
+                                if let Err(e) = socket.emit("history_event_data", &event_history) {
+                                    warn!("Failed to send history event data: {}", e);
+                                } else {
+                                    info!(
+                                        "✅ Successfully sent {} historical events for mint: {}",
+                                        event_history.data.len(),
+                                        data.symbol
+                                    );
+                                    // 更新历史数据发送计数
+                                    {
+                                        let mut manager = subscriptions.write().await;
+                                        if let Some(client) =
+                                            manager.connections.get_mut(&socket.id.to_string())
+                                        {
+                                            client.history_data_sent_count += 1;
+                                            client.total_messages_sent += 1;
+                                        }
+                                    }
+                                }
+                            } else {
+                                warn!("❌ Failed to get historical event data for mint: {}", data.symbol);
                             }
 
                             // 确认订阅成功
@@ -556,6 +608,65 @@ impl KlineSocketService {
                 });
             }
         });
+    }
+
+    /// 广播交易事件到订阅者
+    pub async fn broadcast_event_update(
+        &self,
+        event: &SpinPetEvent,
+    ) -> Result<()> {
+        let mint_account = self.get_mint_account_from_event(event);
+        info!("📡 Broadcasting event update for mint: {}", mint_account);
+
+        let event_type_name = get_event_type_name(event);
+        let event_message = EventUpdateMessage {
+            symbol: mint_account.clone(),
+            event_type: event_type_name,
+            event_data: event.clone(),
+            timestamp: Utc::now().timestamp_millis() as u64,
+        };
+
+        // Use the same intervals as K-line push - broadcast to all possible intervals
+        let intervals = ["s1", "s30", "m5"];
+        let mut broadcast_count = 0;
+
+        for interval in intervals {
+            let room_name = format!("kline:{}:{}", mint_account, interval);
+            
+            let result = self
+                .socketio
+                .of("/kline")
+                .ok_or_else(|| anyhow::anyhow!("Namespace /kline not found"))?
+                .to(room_name.clone())
+                .emit("event_data", &event_message)
+                .await;
+
+            match result {
+                Ok(_) => {
+                    info!("✅ Successfully broadcasted event to room {}", room_name);
+                    broadcast_count += 1;
+                }
+                Err(e) => {
+                    warn!("❌ Failed to broadcast event to room {}: {}", room_name, e);
+                }
+            }
+        }
+
+        info!("📡 Event broadcast completed for mint: {}, sent to {} rooms", mint_account, broadcast_count);
+        Ok(())
+    }
+
+    /// 从事件中获取 mint_account
+    fn get_mint_account_from_event(&self, event: &SpinPetEvent) -> String {
+        match event {
+            SpinPetEvent::TokenCreated(e) => e.mint_account.clone(),
+            SpinPetEvent::BuySell(e) => e.mint_account.clone(),
+            SpinPetEvent::LongShort(e) => e.mint_account.clone(),
+            SpinPetEvent::ForceLiquidate(e) => e.mint_account.clone(),
+            SpinPetEvent::FullClose(e) => e.mint_account.clone(),
+            SpinPetEvent::PartialClose(e) => e.mint_account.clone(),
+            SpinPetEvent::MilestoneDiscount(e) => e.mint_account.clone(),
+        }
     }
 
     /// 广播K线更新到订阅者
@@ -803,6 +914,58 @@ async fn get_kline_history(
     })
 }
 
+/// 获取历史交易事件数据
+async fn get_event_history(
+    event_storage: &Arc<EventStorage>,
+    symbol: &str,
+    limit: usize,
+) -> Result<EventHistoryResponse> {
+    use crate::services::event_storage::EventQuery;
+    
+    let query = EventQuery {
+        mint_account: symbol.to_string(),
+        page: Some(1),
+        limit: Some(limit),
+        order_by: Some("slot_desc".to_string()), // slot 从大到小排列
+    };
+
+    let response = event_storage.query_events(query).await?;
+
+    let data: Vec<EventUpdateMessage> = response
+        .events
+        .into_iter()
+        .map(|event| {
+            let event_type_name = get_event_type_name(&event);
+            EventUpdateMessage {
+                symbol: symbol.to_string(),
+                event_type: event_type_name,
+                event_data: event,
+                timestamp: Utc::now().timestamp_millis() as u64,
+            }
+        })
+        .collect();
+
+    Ok(EventHistoryResponse {
+        symbol: symbol.to_string(),
+        data,
+        has_more: response.has_next,
+        total_count: response.total,
+    })
+}
+
+/// 获取事件类型名称
+fn get_event_type_name(event: &SpinPetEvent) -> String {
+    match event {
+        SpinPetEvent::TokenCreated(_) => "TokenCreated".to_string(),
+        SpinPetEvent::BuySell(_) => "BuySell".to_string(),
+        SpinPetEvent::LongShort(_) => "LongShort".to_string(),
+        SpinPetEvent::ForceLiquidate(_) => "ForceLiquidate".to_string(),
+        SpinPetEvent::FullClose(_) => "FullClose".to_string(),
+        SpinPetEvent::PartialClose(_) => "PartialClose".to_string(),
+        SpinPetEvent::MilestoneDiscount(_) => "MilestoneDiscount".to_string(),
+    }
+}
+
 /// 连接清理任务
 pub async fn start_connection_cleanup_task(
     subscriptions: Arc<RwLock<SubscriptionManager>>,
@@ -1027,7 +1190,15 @@ impl EventHandler for KlineEventHandler {
         // 1. 调用现有的统计和存储逻辑
         self.stats_handler.handle_event(event.clone()).await?;
 
-        // 2. 提取价格信息并触发实时推送
+        // 2. 实时推送交易事件给订阅者
+        info!("📡 Broadcasting event to subscribers: {:?}", event);
+        if let Err(e) = self.kline_service.broadcast_event_update(&event).await {
+            warn!("❌ Failed to broadcast event update: {}", e);
+        } else {
+            info!("✅ Successfully broadcasted event update");
+        }
+
+        // 3. 提取价格信息并触发K线推送
         if let Some((mint_account, latest_price, timestamp)) = self.extract_price_info(&event) {
             info!(
                 "💰 Extracted price info: mint={}, price={}, timestamp={}",

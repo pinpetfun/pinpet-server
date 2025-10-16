@@ -49,6 +49,9 @@ pub struct SolanaConfig {
     /// Whether to process failed transactions for development/testing (default: false)
     #[serde(default)]
     pub process_failed_transactions: bool,
+    /// Whether to log raw Solana messages to separate file for debugging (default: false)
+    #[serde(default)]
+    pub enable_raw_message_logging: bool,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -63,7 +66,7 @@ pub struct IpfsConfig {
     pub max_retries: u32,
     pub retry_delay_seconds: u64,
 }
-
+ 
 #[derive(Debug, Deserialize, Clone)]
 pub struct KlineServiceConfig {
     pub enable_kline_service: bool,

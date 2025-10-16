@@ -158,10 +158,12 @@ pub struct PartialCloseEvent {
     pub lock_lp_token_amount: u64,
     pub start_time: u32,
     pub end_time: u32,
+    pub margin_init_sol_amount: u64, // Initial margin SOL amount
     pub margin_sol_amount: u64,
     pub borrow_amount: u64,
     pub position_asset_amount: u64,
     pub borrow_fee: u16,
+    pub realized_sol_amount: u64, // Realized profit/loss in SOL amount
     #[schema(value_type = String)]
     pub timestamp: DateTime<Utc>,
     pub signature: String,
@@ -951,9 +953,9 @@ impl EventParser {
             data.len()
         );
 
-        if data.len() < 316 {
+        if data.len() < 332 {
             return Err(anyhow::anyhow!(
-                "PartialCloseEvent data length insufficient, need at least 316 bytes, actual: {}",
+                "PartialCloseEvent data length insufficient, need at least 332 bytes, actual: {}",
                 data.len()
             ));
         }
@@ -1076,37 +1078,53 @@ impl EventParser {
         );
         debug!("✅ end_time: {}", end_time);
 
-        debug!("🔍 Parsing margin_sol_amount (290..298)");
-        let margin_sol_amount = u64::from_le_bytes(
+        debug!("🔍 Parsing margin_init_sol_amount (290..298)");
+        let margin_init_sol_amount = u64::from_le_bytes(
             data[290..298]
+                .try_into()
+                .map_err(|e| anyhow::anyhow!("Failed to parse margin_init_sol_amount: {}", e))?,
+        );
+        debug!("✅ margin_init_sol_amount: {}", margin_init_sol_amount);
+
+        debug!("🔍 Parsing margin_sol_amount (298..306)");
+        let margin_sol_amount = u64::from_le_bytes(
+            data[298..306]
                 .try_into()
                 .map_err(|e| anyhow::anyhow!("Failed to parse margin_sol_amount: {}", e))?,
         );
         debug!("✅ margin_sol_amount: {}", margin_sol_amount);
 
-        debug!("🔍 Parsing borrow_amount (298..306)");
+        debug!("🔍 Parsing borrow_amount (306..314)");
         let borrow_amount = u64::from_le_bytes(
-            data[298..306]
+            data[306..314]
                 .try_into()
                 .map_err(|e| anyhow::anyhow!("Failed to parse borrow_amount: {}", e))?,
         );
         debug!("✅ borrow_amount: {}", borrow_amount);
 
-        debug!("🔍 Parsing position_asset_amount (306..314)");
+        debug!("🔍 Parsing position_asset_amount (314..322)");
         let position_asset_amount = u64::from_le_bytes(
-            data[306..314]
+            data[314..322]
                 .try_into()
                 .map_err(|e| anyhow::anyhow!("Failed to parse position_asset_amount: {}", e))?,
         );
         debug!("✅ position_asset_amount: {}", position_asset_amount);
 
-        debug!("🔍 Parsing borrow_fee (314..316)");
+        debug!("🔍 Parsing borrow_fee (322..324)");
         let borrow_fee = u16::from_le_bytes(
-            data[314..316]
+            data[322..324]
                 .try_into()
                 .map_err(|e| anyhow::anyhow!("Failed to parse borrow_fee: {}", e))?,
         );
         debug!("✅ borrow_fee: {}", borrow_fee);
+
+        debug!("🔍 Parsing realized_sol_amount (324..332)");
+        let realized_sol_amount = u64::from_le_bytes(
+            data[324..332]
+                .try_into()
+                .map_err(|e| anyhow::anyhow!("Failed to parse realized_sol_amount: {}", e))?,
+        );
+        debug!("✅ realized_sol_amount: {}", realized_sol_amount);
 
         debug!("🎉 PartialCloseEvent parsed");
         Ok(PartialCloseEvent {
@@ -1128,10 +1146,12 @@ impl EventParser {
             lock_lp_token_amount,
             start_time,
             end_time,
+            margin_init_sol_amount,
             margin_sol_amount,
             borrow_amount,
             position_asset_amount,
             borrow_fee,
+            realized_sol_amount,
             timestamp,
             signature: signature.to_string(),
             slot,

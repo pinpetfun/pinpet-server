@@ -27,7 +27,8 @@ pub const KLINE_INTERVAL_30S: &str = "s30";
 pub const KLINE_INTERVAL_5M: &str = "m5";
 
 /// Precision constant for u128 to f64 conversion (28 decimal places)
-pub const PRICE_PRECISION: u128 = 10_u128.pow(28);
+//pub const PRICE_PRECISION: u128 = 10_u128.pow(28);
+pub const PRICE_PRECISION: u128 = 10_u128.pow(26);
 
 /// Event storage service
 pub struct EventStorage {
@@ -101,11 +102,13 @@ pub struct OrderData {
     pub lock_lp_token_amount: u64,
     pub start_time: u32,
     pub end_time: u32,
+    pub margin_init_sol_amount: u64, // Initial margin SOL amount
     pub margin_sol_amount: u64,
     pub borrow_amount: u64,
     pub position_asset_amount: u64,
     pub borrow_fee: u16,
     pub order_pda: String,
+    pub realized_sol_amount: u64, // Cumulative realized profit/loss from partial closes
     // Token information fields
     #[serde_as(as = "DisplayFromStr")]
     pub latest_price: u128,
@@ -475,11 +478,13 @@ impl EventStorage {
             lock_lp_token_amount: event.lock_lp_token_amount,
             start_time: event.start_time,
             end_time: event.end_time,
+            margin_init_sol_amount: event.margin_sol_amount, // Use margin_sol_amount as initial value for new orders
             margin_sol_amount: event.margin_sol_amount,
             borrow_amount: event.borrow_amount,
             position_asset_amount: event.position_asset_amount,
             borrow_fee: event.borrow_fee,
             order_pda: event.order_pda.clone(),
+            realized_sol_amount: 0, // Initialize to 0 for new orders
             // Initialize token info fields with defaults - will be enriched later
             latest_price: 0,
             latest_trade_time: 0,
@@ -501,11 +506,13 @@ impl EventStorage {
             lock_lp_token_amount: event.lock_lp_token_amount,
             start_time: event.start_time,
             end_time: event.end_time,
+            margin_init_sol_amount: event.margin_init_sol_amount, // Use value from partial close event
             margin_sol_amount: event.margin_sol_amount,
             borrow_amount: event.borrow_amount,
             position_asset_amount: event.position_asset_amount,
             borrow_fee: event.borrow_fee,
             order_pda: event.order_pda.clone(),
+            realized_sol_amount: event.realized_sol_amount, // Use value from partial close event
             // Initialize token info fields with defaults - will be enriched later
             latest_price: 0,
             latest_trade_time: 0,
@@ -1865,6 +1872,11 @@ impl EventStorage {
                                         .and_then(|v| v.as_u64())
                                         .unwrap_or(0)
                                         as u32,
+                                    margin_init_sol_amount: old_order
+                                        .get("margin_init_sol_amount")
+                                        .and_then(|v| v.as_u64())
+                                        .or_else(|| old_order.get("margin_sol_amount").and_then(|v| v.as_u64()))
+                                        .unwrap_or(0), // Fallback to margin_sol_amount for old data
                                     margin_sol_amount: old_order
                                         .get("margin_sol_amount")
                                         .and_then(|v| v.as_u64())
@@ -1887,6 +1899,10 @@ impl EventStorage {
                                         .and_then(|v| v.as_str())
                                         .unwrap_or("")
                                         .to_string(),
+                                    realized_sol_amount: old_order
+                                        .get("realized_sol_amount")
+                                        .and_then(|v| v.as_u64())
+                                        .unwrap_or(0), // Default to 0 for old data
                                     // Initialize new fields with defaults
                                     latest_price: 0,
                                     latest_trade_time: 0,
@@ -1969,13 +1985,15 @@ impl EventStorage {
             lock_lp_end_price: 120000000000000000000u128,   // Example price
             lock_lp_sol_amount: 1000000000,                 // 1 SOL in lamports
             lock_lp_token_amount: 500000000,
-            start_time: 1758343400,       // Example timestamp
-            end_time: 1758343800,         // Example timestamp
-            margin_sol_amount: 500000000, // 0.5 SOL
+            start_time: 1758343400,              // Example timestamp
+            end_time: 1758343800,                // Example timestamp
+            margin_init_sol_amount: 500000000,   // 0.5 SOL initial margin
+            margin_sol_amount: 500000000,        // 0.5 SOL
             borrow_amount: 1500000000,
             position_asset_amount: 2000000000,
             borrow_fee: 250,
             order_pda: order_pda.to_string(),
+            realized_sol_amount: 0, // Initialize to 0 for test order
             // Initialize with defaults - will be enriched later
             latest_price: 0,
             latest_trade_time: 0,
@@ -2137,6 +2155,8 @@ mod tests {
                 event_buffer_size: 1000,
                 event_batch_size: 100,
                 ping_interval_seconds: 60,
+                process_failed_transactions: false,
+                enable_raw_message_logging: false,
             },
             database: crate::config::DatabaseConfig {
                 rocksdb_path: temp_dir.path().to_str().unwrap().to_string(),

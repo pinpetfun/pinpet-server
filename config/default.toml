@@ -27,7 +27,9 @@ event_batch_size = 100
 ping_interval_seconds = 15
 # Whether to process failed transactions for development/testing (default: false)
 # Set to true in development to get more K-line data points
-process_failed_transactions = true
+process_failed_transactions = false
+# Whether to log raw Solana messages to separate file for debugging (default: false)
+enable_raw_message_logging = true
 
 [database]
 rocksdb_path = "./data/rocksdb"
